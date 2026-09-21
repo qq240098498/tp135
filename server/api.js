@@ -4,6 +4,7 @@ const { load } = require('./store');
 const teams = require('./teams');
 const venues = require('./venues');
 const matches = require('./matches');
+const { buildPots, drawGroups, readGroupSize: drawReadGroupSize } = require('./draw');
 const { computeTable } = require('./standings');
 
 function readQuery(query, name) {
@@ -49,11 +50,48 @@ function summary() {
   };
 }
 
+// 抽签用的参赛球队：只取状态为参赛的，按上赛季名次排好
+function activeTeamsForDraw() {
+  const data = load();
+  return data.teams
+    .filter((item) => item.status === '参赛')
+    .slice()
+    .sort((a, b) => a.seedRank - b.seedRank);
+}
+
+// 抽签前先看档位：按名次会切成哪几档、哪些队落在最后一个不满档
+function previewPots(options) {
+  const input = options && typeof options === 'object' ? options : {};
+  const active = activeTeamsForDraw();
+  if (active.length < 2) {
+    throw new ApiError(400, 'DRAW_TEAMS_TOO_FEW', '参赛球队不足 2 支，先到球队页登记再抽签', '');
+  }
+  const groupSize = drawReadGroupSize(input, active.length);
+  const built = buildPots(active, groupSize);
+  return {
+    groupSize: built.groupSize,
+    groupCount: built.groupCount,
+    potCount: built.potCount,
+    teamCount: active.length,
+    placedCount: built.placedCount,
+    pots: built.pots,
+    remainder: built.remainder,
+  };
+}
+
+// 执行抽签：纯函数算出结果，不落库；种子编号随结果返回，填回即可复现
+function performDraw(payload) {
+  const active = activeTeamsForDraw();
+  return drawGroups(active, payload || {});
+}
+
 module.exports = {
   ApiError,
   readQuery,
   summary,
   computeTable,
+  previewPots,
+  performDraw,
   ...teams,
   ...venues,
   ...matches,

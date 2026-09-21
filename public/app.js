@@ -13,6 +13,7 @@ const state = {
   venueFilter: { keyword: '' },
   matchFilter: { round: '', status: '', keyword: '' },
   tableFilter: { keyword: '' },
+  draw: { teams: [], preview: null, result: null },
 };
 
 const OPERATOR_KEY = 'league-board-operator';
@@ -22,6 +23,7 @@ const VIEW_META = {
   teams: { title: '球队', sub: '登记参赛球队、简称、主场与档位', action: '新增球队' },
   venues: { title: '场地', sub: '登记比赛场地、容量与可用日', action: '新增场地' },
   matches: { title: '赛程', sub: '按轮次查看对阵，登记比分后积分随之变化', action: '新增赛程' },
+  draw: { title: '分组抽签', sub: '按上赛季名次分档，抽签成组，同城球队互相回避', action: '' },
   table: { title: '积分榜', sub: '按积分、净胜球、进球依次排序', action: '' },
 };
 
@@ -233,6 +235,129 @@ function renderStandings() {
     </tr>`).join('');
 }
 
+/* 分组抽签 */
+async function loadDrawTeams() {
+  const payload = await request('/api/teams?status=%E5%8F%82%E8%B5%9B');
+  state.draw.teams = payload.teams;
+  renderDrawConfig();
+  await loadDrawPreview();
+}
+
+// 小组数量默认 4（队数不足时退到 2 或 3）；不整除也没关系，余数队会单列说明
+function defaultGroupSize(n) {
+  return Math.max(2, Math.min(n, 4));
+}
+
+function renderDrawConfig() {
+  const select = el('draw-group-size');
+  const n = state.draw.teams.length;
+  select.innerHTML = n >= 2
+    ? Array.from({ length: n - 1 }, (_, i) => i + 2)
+      .map((size) => `<option value="${size}">${size} 组（每档 ${size} 队）</option>`).join('')
+    : '';
+  if (n >= 2) select.value = String(defaultGroupSize(n));
+  el('draw-submit').disabled = n < 2;
+}
+
+async function loadDrawPreview() {
+  const hint = el('draw-config-hint');
+  const n = state.draw.teams.length;
+  if (n < 2) {
+    hint.textContent = '参赛球队不足 2 支，先到球队页登记球队再来抽签。';
+    return;
+  }
+  try {
+    const params = new URLSearchParams({ groupSize: el('draw-group-size').value });
+    const preview = await request(`/api/draw/pots?${params}`);
+    state.draw.preview = preview;
+    const left = preview.teamCount - preview.placedCount;
+    hint.textContent = `参赛 ${preview.teamCount} 队，将分成 ${preview.potCount} 档、${preview.groupCount} 个小组，每档抽一支进每组`
+      + (left > 0 ? `；名次最后的 ${left} 队凑不满一档，不会参与抽签并单列说明。` : '，所有球队都能落位。');
+  } catch (err) {
+    hint.textContent = err.message;
+  }
+}
+
+async function submitDraw() {
+  const groupSize = Number(el('draw-group-size').value);
+  const seed = el('draw-seed').value.trim();
+  const maxRetries = el('draw-max-retries').value;
+  try {
+    const result = await request('/api/draw', {
+      method: 'POST',
+      body: JSON.stringify({ groupSize, seed, maxRetries: maxRetries === '' ? undefined : Number(maxRetries) }),
+    });
+    state.draw.result = result;
+    renderDrawResult(result);
+    toast(`抽签完成，种子编号 ${result.seed}`, 'ok');
+  } catch (err) {
+    toast(err.message, 'bad');
+  }
+}
+
+function renderDrawResult(result) {
+  el('draw-result').hidden = false;
+  el('draw-seed-value').textContent = result.seed;
+
+  el('draw-notices').innerHTML = result.notices.length
+    ? result.notices.map((text) => `<div class="draw-notice">${escapeHtml(text)}</div>`).join('')
+    : '';
+
+  el('draw-pots').innerHTML = result.pots.map((pot) => `<div class="pot-card">
+      <div class="pot-name">第 ${pot.potNo} 档<span>名次 ${pot.rankFrom}–${pot.rankTo}</span></div>
+      <ul>${pot.teams.map((team) => `<li>${escapeHtml(team.name)}<em>${escapeHtml(team.city)}</em></li>`).join('')}</ul>
+    </div>`).join('');
+
+  el('draw-groups-hint').textContent = result.groupSizeEqual
+    ? `每组 ${result.groups[0] ? result.groups[0].size : 0} 队，各组队数相等`
+    : '同城回避无法完全满足，部分小组少队，原因见下方说明';
+  el('draw-groups').innerHTML = result.groups.map((group) => `<div class="group-card">
+      <div class="group-name">${escapeHtml(group.groupLabel)}<span>${group.size} 队</span></div>
+      <ul>${group.teams.map((team) => `<li><b>${escapeHtml(team.name)}</b><em>第 ${team.potNo} 档 · ${escapeHtml(team.city)}</em></li>`).join('')}</ul>
+    </div>`).join('');
+
+  const ordered = result.assignments.slice().sort((a, b) => a.seedRank - b.seedRank);
+  el('draw-assignments').innerHTML = ordered.map((row) => `<tr>
+      <td class="num">${row.seedRank}</td>
+      <td>${escapeHtml(row.name)}</td>
+      <td>${escapeHtml(row.city)}</td>
+      <td class="num">第 ${row.potNo} 档</td>
+      <td><span class="pill done">${escapeHtml(row.groupLabel)}</span></td>
+    </tr>`).join('');
+
+  el('draw-retries').innerHTML = result.retries.length
+    ? result.retries.map((item) => `<li><span class="retry-tag">重试 ${item.attempt}</span>${escapeHtml(item.detail)}</li>`).join('')
+    : '<li class="muted">各档一次落位成功，没有触发重试。</li>';
+
+  const leftoverCard = el('draw-leftover-card');
+  if (result.leftovers.length) {
+    leftoverCard.hidden = false;
+    el('draw-leftovers').innerHTML = result.leftovers.map((item) => `<li>
+        <b>${escapeHtml(item.name)}</b>（${escapeHtml(item.city)}，名次 ${item.seedRank}）
+        <span class="muted">${escapeHtml(item.reason)}</span>
+      </li>`).join('');
+  } else {
+    leftoverCard.hidden = true;
+  }
+}
+
+async function copyDrawSeed() {
+  const text = el('draw-seed-value').textContent;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('种子编号已复制', 'ok');
+  } catch (err) {
+    const box = document.createElement('textarea');
+    box.value = text;
+    document.body.appendChild(box);
+    box.select();
+    document.execCommand('copy');
+    box.remove();
+    toast('种子编号已复制', 'ok');
+  }
+}
+
 /* 抽屉与表单 */
 function fieldHtml(kind, name, label, extra) {
   const attrs = extra || '';
@@ -403,6 +528,7 @@ async function switchView(view) {
     if (view === 'teams') { await Promise.all([loadVenues(), loadTeams()]); }
     if (view === 'venues') await loadVenues();
     if (view === 'matches') { await Promise.all([loadTeams(), loadMatches()]); }
+    if (view === 'draw') await loadDrawTeams();
     if (view === 'table') await loadStandings();
   } catch (err) {
     toast(err.message, 'bad');
@@ -453,6 +579,18 @@ el('round-chips').addEventListener('click', (event) => {
   if (!node) return;
   state.matchFilter.round = node.dataset.round;
   loadMatches().catch((err) => toast(err.message, 'bad'));
+});
+
+el('draw-group-size').addEventListener('change', () => {
+  state.draw.result = null;
+  el('draw-result').hidden = true;
+  loadDrawPreview().catch((err) => toast(err.message, 'bad'));
+});
+el('draw-submit').addEventListener('click', submitDraw);
+el('draw-copy-seed').addEventListener('click', copyDrawSeed);
+el('draw-reuse-seed').addEventListener('click', () => {
+  el('draw-seed').value = el('draw-seed-value').textContent;
+  el('draw-seed').focus();
 });
 
 document.addEventListener('click', async (event) => {

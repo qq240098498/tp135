@@ -120,6 +120,23 @@ app.get('/api/standings', (req, res) => {
   res.json(api.computeTable({ keyword: api.readQuery(req.query, 'keyword') }));
 });
 
+// 抽签：先看档位，再带种子编号执行；抽签不落库，同一个种子编号必复现同一份分组
+app.get('/api/draw/pots', (req, res) => {
+  try {
+    res.json(api.previewPots({ groupSize: api.readQuery(req.query, 'groupSize') }));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/draw', (req, res) => {
+  try {
+    res.status(201).json(api.performDraw(req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: { code: 'API_NOT_FOUND', message: '接口不存在', field: '' } });
 });

@@ -22,6 +22,7 @@
         <button type="button" class="nav-item" data-view="teams"><span>球队</span><em id="nav-teams">0</em></button>
         <button type="button" class="nav-item" data-view="venues"><span>场地</span><em id="nav-venues">0</em></button>
         <button type="button" class="nav-item" data-view="matches"><span>赛程</span><em id="nav-matches">0</em></button>
+        <button type="button" class="nav-item" data-view="draw"><span>抽签</span><em>分组</em></button>
         <button type="button" class="nav-item" data-view="table"><span>积分榜</span><em>名次</em></button>
       </nav>
 
@@ -112,6 +113,63 @@
           </table>
           <p class="empty" id="match-empty">没有符合条件的赛程</p>
         </article>
+      </section>
+
+      <section class="view" id="view-draw">
+        <div class="card draw-config">
+          <div class="draw-config-row">
+            <label class="field"><span>小组数量（也是每档队数）</span><select id="draw-group-size"></select></label>
+            <label class="field"><span>种子编号</span><input id="draw-seed" maxlength="64" placeholder="留空随机生成；把旧编号填回来可复现同一次抽签"></label>
+            <label class="field"><span>同城回避重试上限</span><input id="draw-max-retries" type="number" min="0" max="500" value="50"></label>
+            <button type="button" class="primary" id="draw-submit">开始抽签</button>
+          </div>
+          <p class="hint" id="draw-config-hint"></p>
+        </div>
+
+        <div class="draw-result" id="draw-result" hidden>
+          <div class="seed-bar card">
+            <div>
+              <span class="hint">本次种子编号（填回框里再抽一次，结果完全相同）</span>
+              <strong id="draw-seed-value"></strong>
+            </div>
+            <div class="seed-actions">
+              <button type="button" class="ghost" id="draw-copy-seed">复制编号</button>
+              <button type="button" class="ghost" id="draw-reuse-seed">填回编号</button>
+            </div>
+          </div>
+
+          <div id="draw-notices"></div>
+
+          <article class="card">
+            <header class="card-head"><h2>档位</h2><span class="hint">按上赛季名次每 N 名一档，每档抽一支进每组</span></header>
+            <div class="pot-grid" id="draw-pots"></div>
+          </article>
+
+          <article class="card">
+            <header class="card-head"><h2>分组结果</h2><span class="hint" id="draw-groups-hint"></span></header>
+            <div class="group-grid" id="draw-groups"></div>
+          </article>
+
+          <article class="card">
+            <header class="card-head"><h2>落位明细</h2><span class="hint">每支球队落在第几组、第几档</span></header>
+            <table class="grid">
+              <thead>
+                <tr><th>名次</th><th>球队</th><th>城市</th><th>档位</th><th>小组</th></tr>
+              </thead>
+              <tbody id="draw-assignments"></tbody>
+            </table>
+          </article>
+
+          <article class="card">
+            <header class="card-head"><h2>同城回避重试记录</h2><span class="hint">抽到同组被挡回、重新落位的每一次尝试</span></header>
+            <ul class="retry-log" id="draw-retries"></ul>
+          </article>
+
+          <article class="card leftover-box" id="draw-leftover-card">
+            <header class="card-head"><h2>落不下的球队</h2><span class="hint">无法在保证各组等数的前提下完成落位</span></header>
+            <ul class="leftover-list" id="draw-leftovers"></ul>
+          </article>
+        </div>
       </section>
 
       <section class="view" id="view-table">
