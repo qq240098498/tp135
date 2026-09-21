@@ -13,6 +13,7 @@ const state = {
   venueFilter: { keyword: '' },
   matchFilter: { round: '', status: '', keyword: '' },
   tableFilter: { keyword: '' },
+  draw: { preview: null, result: null },
 };
 
 const OPERATOR_KEY = 'league-board-operator';
@@ -22,6 +23,7 @@ const VIEW_META = {
   teams: { title: '球队', sub: '登记参赛球队、简称、主场与档位', action: '新增球队' },
   venues: { title: '场地', sub: '登记比赛场地、容量与可用日', action: '新增场地' },
   matches: { title: '赛程', sub: '按轮次查看对阵，登记比分后积分随之变化', action: '新增赛程' },
+  draw: { title: '抽签分组', sub: '按上赛季名次分档，再逐档抽一支落组；同城球队自动回避', action: '' },
   table: { title: '积分榜', sub: '按积分、净胜球、进球依次排序', action: '' },
 };
 
@@ -233,6 +235,124 @@ function renderStandings() {
     </tr>`).join('');
 }
 
+/* 抽签分组 */
+function drawParams() {
+  return {
+    seed: el('draw-seed').value.trim(),
+    groupCount: el('draw-groups').value.trim(),
+    maxRetries: el('draw-retries').value.trim(),
+  };
+}
+
+async function loadDrawPreview() {
+  const params = new URLSearchParams();
+  const { groupCount, maxRetries } = drawParams();
+  if (groupCount) params.set('groupCount', groupCount);
+  if (maxRetries) params.set('maxRetries', maxRetries);
+  state.draw.preview = await request(`/api/draw/preview${params.toString() ? `?${params}` : ''}`);
+  renderDrawPreview();
+}
+
+async function runDraw() {
+  const { seed, groupCount, maxRetries } = drawParams();
+  const body = { seed };
+  if (groupCount) body.groupCount = Number(groupCount);
+  if (maxRetries) body.maxRetries = Number(maxRetries);
+  state.draw.result = await request('/api/draw', { method: 'POST', body: JSON.stringify(body) });
+  renderDrawResult();
+  // 分档口径与本次抽签一致，静默刷新预览卡片
+  try {
+    await loadDrawPreview();
+  } catch (err) {
+    /* 结果已出，分档预览刷新失败不阻塞页面 */
+  }
+}
+
+function renderDrawPreview() {
+  const data = state.draw.preview;
+  el('draw-preview-empty').classList.remove('show');
+  el('draw-preview-meta').textContent =
+    `${data.season}　参赛 ${data.activeCount} 支 / 共 ${data.teamCount} 支　分 ${data.groupCount} 组，每组 ${data.perGroup} 支，共 ${data.potCount} 档，进抽签 ${data.placedCount} 支`;
+
+  el('draw-warnings').innerHTML = data.warnings.length
+    ? data.warnings.map((text) => `<div class="draw-banner bad">${escapeHtml(text)}</div>`).join('')
+    : '';
+
+  el('draw-pots').innerHTML = data.pots.map((pot) => `
+    <div class="pot-card">
+      <header><b>第 ${pot.potNo} 档</b><span class="hint">上赛季名次第 ${(pot.potNo - 1) * data.groupCount + 1}–${pot.potNo * data.groupCount} 名</span></header>
+      <ul>${pot.teams.map((team) => `<li><span>${escapeHtml(team.name)}</span><em>${escapeHtml(team.city)}</em></li>`).join('')}</ul>
+    </div>`).join('');
+
+  const extra = [];
+  if (data.leftovers.length) {
+    extra.push(`<div class="draw-note warn"><b>凑不齐一档、不进抽签（${data.leftovers.length} 支）</b><ul>${
+      data.leftovers.map((team) => `<li>${escapeHtml(team.name)}（${escapeHtml(team.city)}，上赛季第 ${team.seedRank} 名）：${escapeHtml(team.reason)}</li>`).join('')
+    }</ul></div>`);
+  }
+  if (data.withdrawnTeams.length) {
+    extra.push(`<div class="draw-note muted"><b>未参赛，不参与抽签（${data.withdrawnTeams.length} 支）</b><ul>${
+      data.withdrawnTeams.map((team) => `<li>${escapeHtml(team.name)}（${escapeHtml(team.city)}）：状态为${escapeHtml(team.status)}</li>`).join('')
+    }</ul></div>`);
+  }
+  el('draw-preview-extra').innerHTML = extra.join('');
+}
+
+function renderDrawResult() {
+  const data = state.draw.result;
+  if (!data) return;
+  el('draw-result-card').hidden = false;
+  el('draw-result-meta').textContent =
+    `种子编号「${data.seed}」　分 ${data.groupCount} 组、每组 ${data.perGroup} 支`;
+  el('draw-banner').className = `draw-banner ${data.complete ? 'ok' : 'bad'}`;
+  el('draw-banner').textContent = data.message;
+
+  el('draw-groups-result').innerHTML = data.groups.map((group) => `
+    <div class="group-card">
+      <header><b>第 ${group.groupNo} 组</b><span class="hint">${group.teams.length} 支</span></header>
+      <ol>${group.teams.map((team) => `<li><em>第 ${team.potNo} 档</em><span>${escapeHtml(team.name)}</span><small>${escapeHtml(team.city)}</small></li>`).join('')}</ol>
+    </div>`).join('');
+
+  el('draw-assignment-rows').innerHTML = data.assignments.map((team) => `
+    <tr>
+      <td>${escapeHtml(team.name)}</td>
+      <td>${escapeHtml(team.shortName)}</td>
+      <td>${escapeHtml(team.city)}</td>
+      <td class="num">第 ${team.seedRank} 名</td>
+      <td><span class="group-tag">第 ${team.groupNo} 组</span></td>
+      <td class="num">第 ${team.potNo} 档</td>
+    </tr>`).join('');
+
+  const undrawnHtml = [];
+  if (data.undrawable.length) {
+    undrawnHtml.push(`<div class="draw-note bad"><b>重试到上限仍避不开、未能落位（${data.undrawable.length} 支）</b><ul>${
+      data.undrawable.map((team) => `<li>${escapeHtml(team.name)}（${escapeHtml(team.city)}）：${escapeHtml(team.reason)}</li>`).join('')
+    }</ul></div>`);
+  }
+  if (data.leftovers.length) {
+    undrawnHtml.push(`<div class="draw-note warn"><b>凑不齐一档、单独列出（${data.leftovers.length} 支）</b><ul>${
+      data.leftovers.map((team) => `<li>${escapeHtml(team.name)}（${escapeHtml(team.city)}，上赛季第 ${team.seedRank} 名）：${escapeHtml(team.reason)}</li>`).join('')
+    }</ul></div>`);
+  }
+  if (data.withdrawnTeams.length) {
+    undrawnHtml.push(`<div class="draw-note muted"><b>未参赛，不参与抽签（${data.withdrawnTeams.length} 支）</b><ul>${
+      data.withdrawnTeams.map((team) => `<li>${escapeHtml(team.name)}：状态为${escapeHtml(team.status)}</li>`).join('')
+    }</ul></div>`);
+  }
+  el('draw-undrawn').innerHTML = undrawnHtml.join('');
+
+  el('draw-retry-hint').textContent = data.retryCount
+    ? `共 ${data.retryCount} 次${data.retryLogTruncated ? `，下列只展开前 ${data.retryLogShown} 条` : ''}`
+    : '本次抽签没有球队抽到同城，没有发生重试';
+  el('draw-retry-log').innerHTML = data.retries.length
+    ? data.retries.map((item) => `<li class="${item.kind === '退档重抽' ? 'backtrack' : ''}">
+        <span class="retry-no">#${item.seq}</span>
+        <span class="retry-kind">${escapeHtml(item.kind)}</span>
+        <span>${escapeHtml(item.message)}</span>
+      </li>`).join('')
+    : '<li class="muted">无重试记录</li>';
+}
+
 /* 抽屉与表单 */
 function fieldHtml(kind, name, label, extra) {
   const attrs = extra || '';
@@ -403,6 +523,9 @@ async function switchView(view) {
     if (view === 'teams') { await Promise.all([loadVenues(), loadTeams()]); }
     if (view === 'venues') await loadVenues();
     if (view === 'matches') { await Promise.all([loadTeams(), loadMatches()]); }
+    if (view === 'draw' && !state.draw.preview) {
+      try { await loadDrawPreview(); } catch (err) { toast(err.message, 'bad'); }
+    }
     if (view === 'table') await loadStandings();
   } catch (err) {
     toast(err.message, 'bad');
@@ -447,6 +570,19 @@ el('match-status').addEventListener('change', () => {
 el('table-search').addEventListener('click', () => {
   state.tableFilter.keyword = el('table-keyword').value.trim();
   loadStandings().catch((err) => toast(err.message, 'bad'));
+});
+el('draw-preview').addEventListener('click', () => {
+  loadDrawPreview()
+    .then(() => toast('分档已按当前组数刷新', 'ok'))
+    .catch((err) => { toast(err.message, 'bad'); });
+});
+el('draw-run').addEventListener('click', () => {
+  runDraw()
+    .then(() => toast('抽签完成，种子编号已记录在结果上方', 'ok'))
+    .catch((err) => { toast(err.message, 'bad'); });
+});
+el('draw-seed').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') el('draw-run').click();
 });
 el('round-chips').addEventListener('click', (event) => {
   const node = event.target.closest('button');

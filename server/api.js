@@ -5,6 +5,7 @@ const teams = require('./teams');
 const venues = require('./venues');
 const matches = require('./matches');
 const { computeTable } = require('./standings');
+const draw = require('./draw');
 
 function readQuery(query, name) {
   return pickText(query && query[name]);
@@ -57,4 +58,5 @@ module.exports = {
   ...teams,
   ...venues,
   ...matches,
+  ...draw,
 };

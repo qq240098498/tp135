@@ -120,6 +120,27 @@ app.get('/api/standings', (req, res) => {
   res.json(api.computeTable({ keyword: api.readQuery(req.query, 'keyword') }));
 });
 
+// 抽签前先看分档：几个组、每组几队、哪些队凑不齐一档、城市分布是否必然无解
+app.get('/api/draw/preview', (req, res) => {
+  try {
+    res.json(api.previewDraw({
+      groupCount: api.readQuery(req.query, 'groupCount'),
+      maxRetries: api.readQuery(req.query, 'maxRetries'),
+    }));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// 带种子编号抽签：同一种子复现同一次分组
+app.post('/api/draw', (req, res) => {
+  try {
+    res.status(201).json(api.performDraw(req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: { code: 'API_NOT_FOUND', message: '接口不存在', field: '' } });
 });

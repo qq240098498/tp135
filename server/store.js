@@ -12,6 +12,7 @@ const MAX_VENUE_NAME = 30;
 const MAX_NOTE = 200;
 const MAX_TEAMS = 12;
 const STATUS_POOL = ['待赛', '已赛', '延期', '取消'];
+const TEAM_STATUS_POOL = ['参赛', '退赛'];
 
 // 初始数据：八支球队、四个场地（其中两支球队共用中立体育场）、七轮单循环共二十八场，
 // 前三轮已经打完并记了比分，第四轮有一场延期，其余待赛
@@ -22,7 +23,7 @@ function seedData() {
     { id: 'team-1002', name: '海陵海燕', shortName: 'HLHY', city: '海陵', venueId: 'venue-2002', seedRank: 2, status: '参赛', note: '', createdAt: at, updatedAt: at },
     { id: 'team-1003', name: '云岭苍狼', shortName: 'YLCW', city: '云岭', venueId: 'venue-2003', seedRank: 3, status: '参赛', note: '', createdAt: at, updatedAt: at },
     { id: 'team-1004', name: '平原飞驰', shortName: 'PYFC', city: '平原', venueId: 'venue-2004', seedRank: 4, status: '参赛', note: '', createdAt: at, updatedAt: at },
-    { id: 'team-1005', name: '沙洲锚队', shortName: 'SZMD', city: '沙洲', venueId: 'venue-2004', seedRank: 5, status: '参赛', note: '与平原飞驰共用中立体育场', createdAt: at, updatedAt: at },
+    { id: 'team-1005', name: '沙洲锚队', shortName: 'SZMD', city: '平原', venueId: 'venue-2004', seedRank: 5, status: '参赛', note: '与平原飞驰同为平原城球队，共用中立体育场', createdAt: at, updatedAt: at },
     { id: 'team-1006', name: '白鹿白鹭', shortName: 'BLBL', city: '白鹿', venueId: 'venue-2004', seedRank: 6, status: '参赛', note: '与平原飞驰共用中立体育场', createdAt: at, updatedAt: at },
     { id: 'team-1007', name: '青峰青松', shortName: 'QFQS', city: '青峰', venueId: 'venue-2005', seedRank: 7, status: '参赛', note: '', createdAt: at, updatedAt: at },
     { id: 'team-1008', name: '洛水洛神', shortName: 'LSLS', city: '洛水', venueId: 'venue-2006', seedRank: 8, status: '参赛', note: '', createdAt: at, updatedAt: at },
@@ -49,7 +50,8 @@ function seedData() {
   const rounds = 7;
   let counter = 0;
   for (let round = 1; round <= rounds; round += 1) {
-    const date = `2026-03-${String(7 + (round - 1) * 7).padStart(2, '0')}`;
+    // 从 3 月 7 日起每轮隔七天，用 UTC 日期算，跨月时不会拼出 03-35 这种日子
+    const date = new Date(Date.UTC(2026, 2, 7 + (round - 1) * 7)).toISOString().slice(0, 10);
     for (let i = 0; i < order.length / 2; i += 1) {
       const home = order[i];
       const away = order[order.length - 1 - i];
@@ -142,7 +144,7 @@ function normalize(raw) {
       city: typeof item.city === 'string' ? item.city.trim() : '',
       venueId: venueIds.has(item.venueId) ? item.venueId : '',
       seedRank: Number.isInteger(Number(item.seedRank)) ? Number(item.seedRank) : index + 1,
-      status: STATUS_POOL.includes(item.status) ? item.status : '参赛',
+      status: TEAM_STATUS_POOL.includes(item.status) ? item.status : '参赛',
       note: typeof item.note === 'string' ? item.note : '',
       createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
       updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
